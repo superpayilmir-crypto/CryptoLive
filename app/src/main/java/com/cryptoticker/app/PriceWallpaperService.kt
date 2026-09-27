@@ -79,6 +79,16 @@ class PriceWallpaperService : WallpaperService() {
             }
         }
 
+        /** Резервная проверка блокировки 4 раза в секунду, пока обои видны. */
+        private val lockPoll = object : Runnable {
+            override fun run() {
+                if (!visible) return
+                val want = wantPanel()
+                if (want != panelShown) setPanel(want, !want)
+                main.postDelayed(this, 250L)
+            }
+        }
+
         private val fadeTick = object : Runnable {
             override fun run() {
                 if (!visible) return
@@ -104,6 +114,7 @@ class PriceWallpaperService : WallpaperService() {
         private fun setPanel(show: Boolean, animate: Boolean) {
             if (show == panelShown && !isFading()) {
                 updateSubscription()
+                pushPanelAlpha() // на всякий случай синхронизируем то, что реально нарисовано
                 return
             }
             if (animate) {
@@ -117,14 +128,15 @@ class PriceWallpaperService : WallpaperService() {
             updateSubscription()
             if (show && videoMode) updateOverlay()
             main.removeCallbacks(fadeTick)
-            if (visible) main.post(fadeTick)
+            if (animate && visible) main.post(fadeTick) else pushPanelAlpha()
         }
 
         private fun pushPanelAlpha() {
             if (videoMode) {
                 val a = panelAlpha()
+                if (panelShown && overlay == null) updateOverlay()
                 glHandler?.post { gl?.overlayAlpha = a; gl?.render() }
-            } else {
+            } else if (surfaceReady) {
                 drawCanvasFrame()
             }
         }
@@ -188,10 +200,13 @@ class PriceWallpaperService : WallpaperService() {
         override fun onVisibilityChanged(visible: Boolean) {
             this.visible = visible
             main.removeCallbacks(frame)
+            main.removeCallbacks(lockPoll)
             if (visible) {
                 setPanel(wantPanel(), false)
                 updateSubscription()
                 applyMode()
+                pushPanelAlpha()
+                main.postDelayed(lockPoll, 250L)
                 if (videoMode) {
                     val animate = Prefs.animate(applicationContext)
                     glHandler?.post { if (animate) gl?.play() else gl?.pause(); gl?.render() }
@@ -219,6 +234,7 @@ class PriceWallpaperService : WallpaperService() {
             main.removeCallbacks(frame)
             main.removeCallbacks(overlayRunnable)
             main.removeCallbacks(fadeTick)
+            main.removeCallbacks(lockPoll)
             subscribed = false
             PriceHub.unsubscribe(this)
             if (receiverOn) {
