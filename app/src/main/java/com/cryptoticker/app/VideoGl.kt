@@ -53,6 +53,9 @@ class VideoGl(private val ctx: Context) {
     private val overlayUv: FloatBuffer = floats(0f, 1f, 1f, 1f, 0f, 0f, 1f, 0f)
     private val identity = FloatArray(16).also { android.opengl.Matrix.setIdentityM(it, 0) }
 
+    /** Прозрачность панели с ценами (0 — скрыта). Меняется только из GL-потока. */
+    var overlayAlpha = 1f
+
     val isReady: Boolean get() = surface != EGL14.EGL_NO_SURFACE
 
     /** @param onFrame вызывается (в GL-потоке через handler) при каждом новом кадре видео */
@@ -173,7 +176,7 @@ class VideoGl(private val ctx: Context) {
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
         GLES20.glDisable(GLES20.GL_BLEND)
         draw(videoProgram, GLES11Ext.GL_TEXTURE_EXTERNAL_OES, videoTex, videoUv, texMatrix)
-        if (overlayValid) {
+        if (overlayValid && overlayAlpha > 0.01f) {
             GLES20.glEnable(GLES20.GL_BLEND)
             GLES20.glBlendFunc(GLES20.GL_ONE, GLES20.GL_ONE_MINUS_SRC_ALPHA)
             draw(overlayProgram, GLES20.GL_TEXTURE_2D, overlayTex, overlayUv, identity, overlayPos)
@@ -232,6 +235,8 @@ class VideoGl(private val ctx: Context) {
         GLES20.glBindTexture(target, tex)
         GLES20.glUniform1i(uS, 0)
         GLES20.glUniformMatrix4fv(uM, 1, false, m, 0)
+        val uA = GLES20.glGetUniformLocation(prog, "uAlpha")
+        if (uA >= 0) GLES20.glUniform1f(uA, overlayAlpha)
         p.position(0)
         uv.position(0)
         GLES20.glEnableVertexAttribArray(aPos)
@@ -302,7 +307,8 @@ class VideoGl(private val ctx: Context) {
             precision mediump float;
             varying vec2 vTex;
             uniform sampler2D sTex;
-            void main() { gl_FragColor = texture2D(sTex, vTex); }
+            uniform float uAlpha;
+            void main() { gl_FragColor = texture2D(sTex, vTex) * uAlpha; }
         """.trimIndent()
 
         private fun floats(vararg v: Float): FloatBuffer {

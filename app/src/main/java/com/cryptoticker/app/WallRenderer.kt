@@ -155,9 +155,12 @@ object WallRenderer {
         return floatArrayOf(top, top + blockH)
     }
 
-    /** @param overlayOnly только панель с ценами на прозрачном фоне (для видео-обоев) */
+    /**
+     * @param overlayOnly только панель с ценами на прозрачном фоне (для видео-обоев)
+     * @param panelAlpha прозрачность панели: 1 — видна, 0 — скрыта (после разблокировки)
+     */
     @Synchronized
-    fun draw(c: Canvas, w: Int, h: Int, ctx: Context, animated: Boolean, overlayOnly: Boolean = false) {
+    fun draw(c: Canvas, w: Int, h: Int, ctx: Context, animated: Boolean, overlayOnly: Boolean = false, panelAlpha: Float = 1f) {
         if (w <= 0 || h <= 0) return
         val th = current(ctx)
         val W = w.toFloat()
@@ -171,6 +174,17 @@ object WallRenderer {
             drawBackground(c, ctx, th, W, H, animated && th.video == 0)
         }
 
+        if (panelAlpha <= 0.01f) return
+        if (panelAlpha < 0.99f) {
+            val save = c.saveLayerAlpha(0f, 0f, W, H, (panelAlpha * 255).toInt())
+            drawPanel(c, ctx, th, W, H)
+            c.restoreToCount(save)
+        } else {
+            drawPanel(c, ctx, th, W, H)
+        }
+    }
+
+    private fun drawPanel(c: Canvas, ctx: Context, th: Theme, W: Float, H: Float) {
         val u = W / 400f * Prefs.textScale(ctx)
         val pairs = Prefs.pairs(ctx)
         val showChart = Prefs.showChart(ctx)

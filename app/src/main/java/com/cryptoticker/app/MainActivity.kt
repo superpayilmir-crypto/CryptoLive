@@ -175,6 +175,10 @@ class MainActivity : Activity(), PriceHub.Listener {
         root.addView(toggle("Анимация фона (видео и фото)", Prefs.animate(this)) { v ->
             Prefs.setAnimate(this, v); PriceHub.notifyListeners()
         })
+        root.addView(toggle("Цены только на экране блокировки", Prefs.lockOnly(this)) { v ->
+            Prefs.setLockOnly(this, v); PriceHub.notifyListeners()
+        })
+        root.addView(hint("После разблокировки цены плавно исчезают — на рабочем столе остаётся только живой фон."))
         root.addView(toggle("График за 24 часа", Prefs.showChart(this)) { v ->
             Prefs.setShowChart(this, v); PriceHub.notifyListeners()
         })

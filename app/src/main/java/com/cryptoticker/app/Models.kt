@@ -107,6 +107,10 @@ object Prefs {
     fun animate(c: Context): Boolean = sp(c).getBoolean("wp_anim", true)
     fun setAnimate(c: Context, v: Boolean) { sp(c).edit().putBoolean("wp_anim", v).apply() }
 
+    /** Цены только на экране блокировки; на рабочем столе — чистый живой фон. */
+    fun lockOnly(c: Context): Boolean = sp(c).getBoolean("wp_lock_only", true)
+    fun setLockOnly(c: Context, v: Boolean) { sp(c).edit().putBoolean("wp_lock_only", v).apply() }
+
     fun showChart(c: Context): Boolean = sp(c).getBoolean("wp_chart", true)
     fun setShowChart(c: Context, v: Boolean) { sp(c).edit().putBoolean("wp_chart", v).apply() }
 

@@ -1,6 +1,12 @@
 package com.cryptoticker.app
 
+import android.app.KeyguardManager
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.graphics.Bitmap
+import android.os.Build
 import android.graphics.Canvas
 import android.os.Handler
 import android.os.HandlerThread
@@ -16,6 +22,8 @@ import java.util.concurrent.TimeUnit
  *  - тема «Живое видео»: зацикленное видео через OpenGL (VideoGl) + цены поверх;
  *  - остальные темы: фото/градиент на Canvas с плавной анимацией.
  * Сеть, видео и анимация работают, только пока обои видны.
+ * По умолчанию цены показываются только на экране блокировки, после разблокировки
+ * они плавно исчезают и остаётся чистый живой фон.
  */
 class PriceWallpaperService : WallpaperService() {
 
@@ -51,6 +59,108 @@ class PriceWallpaperService : WallpaperService() {
 
         private val overlayRunnable = Runnable { updateOverlay() }
 
+        // --- показ панели с ценами только на экране блокировки ---
+        private val fadeMs = 350L
+        private var panelShown = true
+        private var fadeFrom = 1f
+        private var fadeStart = 0L
+        private var subscribed = false
+        private var receiverOn = false
+
+        private val lockReceiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context, intent: Intent) {
+                when (intent.action) {
+                    // экран гаснет → телефон блокируется: заранее показываем цены
+                    Intent.ACTION_SCREEN_OFF -> setPanel(true, false)
+                    Intent.ACTION_SCREEN_ON -> setPanel(wantPanel(), false)
+                    // разблокировали → цены плавно исчезают
+                    Intent.ACTION_USER_PRESENT -> setPanel(wantPanel(), true)
+                }
+            }
+        }
+
+        private val fadeTick = object : Runnable {
+            override fun run() {
+                if (!visible) return
+                pushPanelAlpha()
+                if (isFading()) main.postDelayed(this, 16L)
+            }
+        }
+
+        private fun wantPanel(): Boolean {
+            if (isPreview || !Prefs.lockOnly(applicationContext)) return true
+            val km = getSystemService(KeyguardManager::class.java) ?: return true
+            return km.isKeyguardLocked
+        }
+
+        private fun isFading(): Boolean = SystemClock.uptimeMillis() - fadeStart < fadeMs
+
+        private fun panelAlpha(): Float {
+            val target = if (panelShown) 1f else 0f
+            val p = ((SystemClock.uptimeMillis() - fadeStart).toFloat() / fadeMs).coerceIn(0f, 1f)
+            return fadeFrom + (target - fadeFrom) * p
+        }
+
+        private fun setPanel(show: Boolean, animate: Boolean) {
+            if (show == panelShown && !isFading()) {
+                updateSubscription()
+                return
+            }
+            if (animate) {
+                fadeFrom = panelAlpha()
+                fadeStart = SystemClock.uptimeMillis()
+            } else {
+                fadeFrom = if (show) 1f else 0f
+                fadeStart = 0L
+            }
+            panelShown = show
+            updateSubscription()
+            if (show && videoMode) updateOverlay()
+            main.removeCallbacks(fadeTick)
+            if (visible) main.post(fadeTick)
+        }
+
+        private fun pushPanelAlpha() {
+            if (videoMode) {
+                val a = panelAlpha()
+                glHandler?.post { gl?.overlayAlpha = a; gl?.render() }
+            } else {
+                drawCanvasFrame()
+            }
+        }
+
+        /** Соединение с биржей нужно, только пока цены видны. */
+        private fun updateSubscription() {
+            val want = visible && panelShown
+            if (want && !subscribed) {
+                subscribed = true
+                PriceHub.subscribe(applicationContext, this)
+            } else if (!want && subscribed) {
+                subscribed = false
+                PriceHub.unsubscribe(this)
+            }
+        }
+
+        override fun onCreate(surfaceHolder: SurfaceHolder) {
+            super.onCreate(surfaceHolder)
+            val f = IntentFilter().apply {
+                addAction(Intent.ACTION_SCREEN_OFF)
+                addAction(Intent.ACTION_SCREEN_ON)
+                addAction(Intent.ACTION_USER_PRESENT)
+            }
+            try {
+                if (Build.VERSION.SDK_INT >= 33) {
+                    registerReceiver(lockReceiver, f, Context.RECEIVER_NOT_EXPORTED)
+                } else {
+                    registerReceiver(lockReceiver, f)
+                }
+                receiverOn = true
+            } catch (_: Exception) {
+            }
+            panelShown = wantPanel()
+            fadeFrom = if (panelShown) 1f else 0f
+        }
+
         // ---------- жизненный цикл ----------
 
         override fun onSurfaceCreated(holder: SurfaceHolder) {
@@ -79,7 +189,8 @@ class PriceWallpaperService : WallpaperService() {
             this.visible = visible
             main.removeCallbacks(frame)
             if (visible) {
-                PriceHub.subscribe(applicationContext, this)
+                setPanel(wantPanel(), false)
+                updateSubscription()
                 applyMode()
                 if (videoMode) {
                     val animate = Prefs.animate(applicationContext)
@@ -89,7 +200,7 @@ class PriceWallpaperService : WallpaperService() {
                     main.post(frame)
                 }
             } else {
-                PriceHub.unsubscribe(this)
+                updateSubscription()
                 glHandler?.post { gl?.pause() }
             }
         }
@@ -98,7 +209,8 @@ class PriceWallpaperService : WallpaperService() {
             visible = false
             surfaceReady = false
             main.removeCallbacks(frame)
-            PriceHub.unsubscribe(this)
+            main.removeCallbacks(fadeTick)
+            updateSubscription()
             stopVideo()
             super.onSurfaceDestroyed(holder)
         }
@@ -106,7 +218,13 @@ class PriceWallpaperService : WallpaperService() {
         override fun onDestroy() {
             main.removeCallbacks(frame)
             main.removeCallbacks(overlayRunnable)
+            main.removeCallbacks(fadeTick)
+            subscribed = false
             PriceHub.unsubscribe(this)
+            if (receiverOn) {
+                try { unregisterReceiver(lockReceiver) } catch (_: Exception) {}
+                receiverOn = false
+            }
             stopVideo()
             overlay = null
             super.onDestroy()
@@ -163,12 +281,14 @@ class PriceWallpaperService : WallpaperService() {
             val hh = height
             val holderSurface = surfaceHolder.surface
             val shouldPlay = visible && Prefs.animate(applicationContext)
+            val alpha0 = panelAlpha()
             h.post {
                 val g = VideoGl(applicationContext)
                 val ok = g.start(holderSurface, res, h) { gl?.render() }
                 if (ok) {
                     gl = g
                     g.setSize(w, hh)
+                    g.overlayAlpha = alpha0
                     if (shouldPlay) g.play()
                     synchronized(overlayLock) { overlay?.let { g.uploadOverlay(it, overlayTop) } }
                     g.render()
@@ -203,7 +323,7 @@ class PriceWallpaperService : WallpaperService() {
         }
 
         private fun updateOverlay() {
-            if (!videoMode || width <= 0 || height <= 0) return
+            if (!videoMode || width <= 0 || height <= 0 || !panelShown) return
             lastOverlay = SystemClock.uptimeMillis()
             // Рисуем только полоску с панелью цен — в разы меньше данных для видеокарты
             val b = WallRenderer.panelBounds(applicationContext, width, height)
@@ -250,7 +370,7 @@ class PriceWallpaperService : WallpaperService() {
                     holder.lockCanvas()
                 }
                 if (canvas != null) {
-                    WallRenderer.draw(canvas, width, height, applicationContext, true)
+                    WallRenderer.draw(canvas, width, height, applicationContext, true, false, panelAlpha())
                 }
             } catch (_: Exception) {
             } finally {
