@@ -11,9 +11,9 @@ jobs:
       - uses: actions/checkout@v4
       - run: |
           mkdir -p photos
-          for id in gzMBvmSl95U QBw_TOUszi0 QP6XWJ9q6GY 02ZazVmgKu8 iyDo5pulWe4 xjwNty75ydM; do
-            curl -sL -A "Mozilla/5.0" "https://unsplash.com/photos/$id/download?force=true" -o photos/$id.jpg || true
-            file photos/$id.jpg; ls -la photos/$id.jpg
+          for id in 1751237422072-a6564c97a90a 1499202189329-5d76e29aa2b6 1753029995957-f973b37fd0e3 1753679704846-7ba944fcb1dd; do
+            curl -sL "https://images.unsplash.com/photo-$id?fm=jpg&q=90&w=2400" -o photos/$id.jpg || true
+            file photos/$id.jpg
           done
           git config user.name "Claude"; git config user.email "noreply@anthropic.com"
           git add photos; git commit -m "photos" && git push
