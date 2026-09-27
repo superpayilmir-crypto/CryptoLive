@@ -10,15 +10,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: |
+          set -x
           sudo apt-get install -y -qq ffmpeg >/dev/null || true
           mkdir -p media
-          for id in 32002998 27212833 35215090 35383429 31949353 28197980 34103646; do
-            curl -sL -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" "https://www.pexels.com/download/video/$id/" -o /tmp/$id.mp4 || true
-            echo "== $id" >> media/info.txt
-            file /tmp/$id.mp4 >> media/info.txt
-            ls -la /tmp/$id.mp4 >> media/info.txt
-            ffprobe -v error -select_streams v:0 -show_entries stream=width,height,r_frame_rate:format=duration -of csv=p=0 /tmp/$id.mp4 >> media/info.txt 2>&1 || true
-            for t in 1 4; do ffmpeg -v error -ss $t -i /tmp/$id.mp4 -frames:v 1 -vf scale=360:-2 media/${id}_$t.jpg || true; done
-          done
+          curl -sL -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" "https://www.pexels.com/download/video/32002998/" -o /tmp/in.mp4
+          D=$(ffprobe -v error -show_entries format=duration -of csv=p=0 /tmp/in.mp4)
+          L=$(python3 -c "print(round($D-0.2,3))")
+          OFF=$(python3 -c "print(round($D-0.2-1.5-1.5,3))")
+          ffmpeg -v error -y -i /tmp/in.mp4 -filter_complex "[0:v]trim=0:$L,setpts=PTS-STARTPTS,fps=30,scale=1080:1920,format=yuv420p,split[a][b];[a]trim=start=1.5,setpts=PTS-STARTPTS[main];[b]trim=0:1.5,setpts=PTS-STARTPTS[head];[main][head]xfade=transition=fade:duration=1.5:offset=$OFF[out]" -map "[out]" -an -c:v libx264 -profile:v high -level 4.1 -preset slow -crf 23 -pix_fmt yuv420p -movflags +faststart media/ocean.mp4
+          ffprobe -v error -show_entries stream=width,height,r_frame_rate:format=duration,size -of default=nw=1 media/ocean.mp4 > media/info.txt
+          ffmpeg -v error -y -i media/ocean.mp4 -frames:v 1 -q:v 2 media/poster.jpg
+          ffmpeg -v error -y -sseof -0.1 -i media/ocean.mp4 -frames:v 1 -vf scale=360:-2 media/last.jpg
+          ffmpeg -v error -y -i media/ocean.mp4 -frames:v 1 -vf scale=360:-2 media/first.jpg
           git config user.name "Claude"; git config user.email "noreply@anthropic.com"
-          git add media; git commit -m "media previews" && git push
+          git add media; git commit -m "ocean loop" && git push
