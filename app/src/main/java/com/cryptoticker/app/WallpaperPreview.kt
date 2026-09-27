@@ -35,7 +35,7 @@ class WallpaperPreview(context: Context) : View(context), PriceHub.Listener {
         canvas.save()
         canvas.clipPath(clip)
         canvas.translate(left, 0f)
-        WallRenderer.draw(canvas, pw, ph, context)
+        WallRenderer.draw(canvas, pw, ph, context, false)
         canvas.restore()
         border.strokeWidth = resources.displayMetrics.density * 1.5f
         canvas.drawRoundRect(frame, r, r, border)

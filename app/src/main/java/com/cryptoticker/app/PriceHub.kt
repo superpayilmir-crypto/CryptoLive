@@ -35,14 +35,12 @@ object PriceHub {
         .connectTimeout(10, TimeUnit.SECONDS)
         .build()
 
-    private const val HISTORY_STEP_MS = 5_000L
-    private const val HISTORY_MAX = 180 // ~15 минут
+    private const val CHART_REFRESH_MS = 10 * 60_000L
 
     private val main = Handler(Looper.getMainLooper())
     private val listeners = LinkedHashSet<Listener>()
     private val prices = HashMap<String, Ticker>()
-    private val history = HashMap<String, ArrayList<Double>>()
-    private val lastSample = HashMap<String, Long>()
+    private val charts = HashMap<String, List<Double>>()
     private val pending = ConcurrentHashMap<String, Ticker>()
     private val flushScheduled = AtomicBoolean(false)
 
@@ -62,7 +60,8 @@ object PriceHub {
     val exchange: Exchange get() = connectedExchange
 
     fun price(key: String): Ticker? = prices[key]
-    fun history(key: String): List<Double> = history[key] ?: emptyList()
+    /** Часовые цены закрытия за последние 24 часа (старые → новые). */
+    fun chart(key: String): List<Double>? = charts[key]
 
     fun subscribe(ctx: Context, l: Listener) {
         appContext = ctx.applicationContext
@@ -99,12 +98,13 @@ object PriceHub {
         val ex = Prefs.exchange(ctx)
         val pairs = Prefs.pairs(ctx)
         if (ex != connectedExchange) {
-            prices.clear(); history.clear(); lastSample.clear(); pending.clear()
+            prices.clear(); charts.clear(); pending.clear()
         }
         connectedExchange = ex
         connectedPairs = pairs
         main.removeCallbacks(reconnectRunnable)
         main.removeCallbacks(pingRunnable)
+        main.removeCallbacks(chartRunnable)
         val gen = ++generation
 
         if (pairs.isEmpty()) {
@@ -127,6 +127,8 @@ object PriceHub {
         notifyListeners()
 
         if (ex == Exchange.BINANCE) fetchBinanceSnapshot(pairs, gen)
+        fetchCharts(ex, pairs, gen)
+        main.postDelayed(chartRunnable, CHART_REFRESH_MS)
 
         socket = http.newWebSocket(Request.Builder().url(url).build(), object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
@@ -181,6 +183,7 @@ object PriceHub {
         generation++
         main.removeCallbacks(reconnectRunnable)
         main.removeCallbacks(pingRunnable)
+        main.removeCallbacks(chartRunnable)
         socket?.close(1000, "bye")
         socket = null
         state = State.IDLE
@@ -199,6 +202,14 @@ object PriceHub {
             notifyListeners()
             main.postDelayed(reconnectRunnable, retryMs)
             retryMs = (retryMs * 2).coerceAtMost(30_000L)
+        }
+    }
+
+    private val chartRunnable: Runnable = object : Runnable {
+        override fun run() {
+            if (listeners.isEmpty()) return
+            fetchCharts(connectedExchange, connectedPairs, generation)
+            main.postDelayed(this, CHART_REFRESH_MS)
         }
     }
 
@@ -272,22 +283,63 @@ object PriceHub {
             if (old != null && t.time < old.time) continue
             val fixed = if (t.changePct.isNaN()) t.copy(changePct = old?.changePct ?: 0.0) else t
             prices[key] = fixed
-
-            val h = history.getOrPut(key) { ArrayList() }
-            val last = lastSample[key] ?: 0L
-            if (h.isEmpty() || now - last >= HISTORY_STEP_MS) {
-                h.add(fixed.price)
-                lastSample[key] = now
-                if (h.size > HISTORY_MAX) h.removeAt(0)
-            } else {
-                h[h.size - 1] = fixed.price
-            }
             if (t.time > 1L) lastUpdate = now
         }
         notifyListeners()
     }
 
     // ---------- REST ----------
+
+    private fun fetchCharts(ex: Exchange, pairs: List<CoinPair>, gen: Int) {
+        for (p in pairs) {
+            val sym = p.symbolFor(ex)
+            val url = when (ex) {
+                Exchange.BINANCE -> "https://api.binance.com/api/v3/klines?symbol=$sym&interval=1h&limit=24"
+                Exchange.BYBIT -> "https://api.bybit.com/v5/market/kline?category=spot&symbol=$sym&interval=60&limit=24"
+                Exchange.OKX -> "https://www.okx.com/api/v5/market/candles?instId=$sym&bar=1H&limit=24"
+            }
+            http.newCall(Request.Builder().url(url).build()).enqueue(object : Callback {
+                override fun onFailure(call: Call, e: IOException) {}
+
+                override fun onResponse(call: Call, response: Response) {
+                    try {
+                        response.use { r ->
+                            if (!r.isSuccessful) return
+                            val body = r.body?.string() ?: return
+                            val closes = ArrayList<Double>()
+                            when (ex) {
+                                Exchange.BINANCE -> {
+                                    val arr = JSONArray(body)
+                                    for (i in 0 until arr.length()) {
+                                        arr.optJSONArray(i)?.optString(4)?.toDoubleOrNull()?.let { closes.add(it) }
+                                    }
+                                }
+                                Exchange.BYBIT -> {
+                                    val arr = JSONObject(body).optJSONObject("result")?.optJSONArray("list") ?: return
+                                    for (i in arr.length() - 1 downTo 0) {
+                                        arr.optJSONArray(i)?.optString(4)?.toDoubleOrNull()?.let { closes.add(it) }
+                                    }
+                                }
+                                Exchange.OKX -> {
+                                    val arr = JSONObject(body).optJSONArray("data") ?: return
+                                    for (i in arr.length() - 1 downTo 0) {
+                                        arr.optJSONArray(i)?.optString(4)?.toDoubleOrNull()?.let { closes.add(it) }
+                                    }
+                                }
+                            }
+                            if (closes.size < 2) return
+                            main.post {
+                                if (gen != generation) return@post
+                                charts[p.key] = closes
+                                notifyListeners()
+                            }
+                        }
+                    } catch (_: Exception) {
+                    }
+                }
+            })
+        }
+    }
 
     private fun fetchBinanceSnapshot(pairs: List<CoinPair>, gen: Int) {
         for (p in pairs) {

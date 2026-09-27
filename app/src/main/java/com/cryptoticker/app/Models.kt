@@ -97,12 +97,18 @@ object Prefs {
         sp(c).edit().putString("exchange", e.name).apply()
     }
 
-    fun theme(c: Context): Int = sp(c).getInt("wp_theme", 0)
-    fun setTheme(c: Context, v: Int) { sp(c).edit().putInt("wp_theme", v).apply() }
+    fun theme(c: Context): Int = sp(c).getInt("wp_theme2", 0)
+    fun setTheme(c: Context, v: Int) { sp(c).edit().putInt("wp_theme2", v).apply() }
 
     /** 0 — выше, 1 — по центру, 2 — ниже */
-    fun position(c: Context): Int = sp(c).getInt("wp_pos", 2)
-    fun setPosition(c: Context, v: Int) { sp(c).edit().putInt("wp_pos", v).apply() }
+    fun position(c: Context): Int = sp(c).getInt("wp_pos2", 1)
+    fun setPosition(c: Context, v: Int) { sp(c).edit().putInt("wp_pos2", v).apply() }
+
+    fun animate(c: Context): Boolean = sp(c).getBoolean("wp_anim", true)
+    fun setAnimate(c: Context, v: Boolean) { sp(c).edit().putBoolean("wp_anim", v).apply() }
+
+    fun showChart(c: Context): Boolean = sp(c).getBoolean("wp_chart", true)
+    fun setShowChart(c: Context, v: Boolean) { sp(c).edit().putBoolean("wp_chart", v).apply() }
 
     fun textScale(c: Context): Float = sp(c).getFloat("wp_scale", 1f)
     fun setTextScale(c: Context, v: Float) { sp(c).edit().putFloat("wp_scale", v).apply() }

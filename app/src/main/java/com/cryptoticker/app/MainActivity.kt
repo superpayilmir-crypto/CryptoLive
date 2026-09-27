@@ -162,12 +162,21 @@ class MainActivity : Activity(), PriceHub.Listener {
         root.addView(hint("В окне установки выберите «Главный экран и экран блокировки»."))
 
         root.addView(label("Оформление"))
-        root.addView(segment(WallRenderer.themes.map { it.name }, Prefs.theme(this)) { i ->
-            Prefs.setTheme(this, i); PriceHub.notifyListeners()
+        root.addView(HorizontalScrollView(this).apply {
+            isHorizontalScrollBarEnabled = false
+            addView(segment(WallRenderer.themes.map { it.name }, Prefs.theme(this@MainActivity), false) { i ->
+                Prefs.setTheme(this@MainActivity, i); PriceHub.notifyListeners()
+            })
         })
         root.addView(label("Положение списка"))
-        root.addView(segment(listOf("Выше", "По центру", "Ниже"), Prefs.position(this)) { i ->
+        root.addView(segment(listOf("Под часами", "По центру", "Ниже"), Prefs.position(this)) { i ->
             Prefs.setPosition(this, i); PriceHub.notifyListeners()
+        })
+        root.addView(toggle("Плавная анимация фото", Prefs.animate(this)) { v ->
+            Prefs.setAnimate(this, v); PriceHub.notifyListeners()
+        })
+        root.addView(toggle("График за 24 часа", Prefs.showChart(this)) { v ->
+            Prefs.setShowChart(this, v); PriceHub.notifyListeners()
         })
         root.addView(label("Размер текста"))
         root.addView(SeekBar(this).apply {
@@ -474,20 +483,30 @@ class MainActivity : Activity(), PriceHub.Listener {
         v.setTextColor(if (selected) 0xFF06140E.toInt() else cText)
     }
 
-    private fun segment(options: List<String>, selected: Int, onSelect: (Int) -> Unit): LinearLayout {
+    private fun toggle(title: String, value: Boolean, onChange: (Boolean) -> Unit) = Switch(this).apply {
+        text = title
+        setTextColor(cText)
+        textSize = 15f
+        isChecked = value
+        setPadding(0, dp(10), 0, dp(4))
+        setOnCheckedChangeListener { _, checked -> onChange(checked) }
+    }
+
+    private fun segment(options: List<String>, selected: Int, stretch: Boolean = true, onSelect: (Int) -> Unit): LinearLayout {
         val box = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         val views = ArrayList<TextView>()
         for ((i, name) in options.withIndex()) {
             val v = chip(name, i == selected) {}
-            v.setPadding(dp(4), dp(10), dp(4), dp(10))
+            if (stretch) v.setPadding(dp(4), dp(10), dp(4), dp(10)) else v.setPadding(dp(16), dp(10), dp(16), dp(10))
             v.setOnClickListener {
                 for ((j, other) in views.withIndex()) styleChip(other, j == i)
                 onSelect(i)
             }
             views.add(v)
-            box.addView(v, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
-                if (i > 0) leftMargin = dp(6)
-            })
+            val lp = if (stretch) LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            else LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+            if (i > 0) lp.leftMargin = dp(6)
+            box.addView(v, lp)
         }
         return box
     }
