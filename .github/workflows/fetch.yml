@@ -1,0 +1,19 @@
+name: Fetch photos
+on:
+  push:
+    branches: [fetch-photos]
+permissions:
+  contents: write
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          mkdir -p photos
+          for id in gzMBvmSl95U QBw_TOUszi0 QP6XWJ9q6GY 02ZazVmgKu8 iyDo5pulWe4 xjwNty75ydM; do
+            curl -sL -A "Mozilla/5.0" "https://unsplash.com/photos/$id/download?force=true" -o photos/$id.jpg || true
+            file photos/$id.jpg; ls -la photos/$id.jpg
+          done
+          git config user.name "Claude"; git config user.email "noreply@anthropic.com"
+          git add photos; git commit -m "photos" && git push
