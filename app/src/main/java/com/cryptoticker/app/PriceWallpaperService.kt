@@ -31,6 +31,7 @@ class PriceWallpaperService : WallpaperService() {
 
         // --- видео-режим ---
         private var videoMode = false
+        private var videoRes = 0
         private var videoFailed = false
         private var glThread: HandlerThread? = null
         private var glHandler: Handler? = null
@@ -135,7 +136,11 @@ class PriceWallpaperService : WallpaperService() {
         // ---------- выбор режима ----------
 
         private fun applyMode() {
-            val wantVideo = WallRenderer.current(applicationContext).video != 0 && !videoFailed
+            val res = WallRenderer.current(applicationContext).video
+            val wantVideo = res != 0 && !videoFailed
+            if (wantVideo && videoMode && res != videoRes) {
+                stopVideo() // сменили одно видео на другое
+            }
             if (wantVideo && !videoMode && surfaceReady && width > 0 && height > 0) {
                 startVideo()
             } else if (!wantVideo && videoMode) {
@@ -147,6 +152,7 @@ class PriceWallpaperService : WallpaperService() {
 
         private fun startVideo() {
             val res = WallRenderer.current(applicationContext).video
+            videoRes = res
             val thread = HandlerThread("wallpaper-gl").also { it.start() }
             val h = Handler(thread.looper)
             glThread = thread

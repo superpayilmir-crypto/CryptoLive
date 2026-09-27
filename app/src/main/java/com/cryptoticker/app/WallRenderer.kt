@@ -31,7 +31,8 @@ object WallRenderer {
     class Theme(val name: String, val photo: Int, val top: Int, val bottom: Int, val video: Int = 0)
 
     val themes = listOf(
-        Theme("Живое видео", R.drawable.bg_video_poster, 0, 0, R.raw.ocean),
+        Theme("Лагуна 4K", R.drawable.bg_lagoon_poster, 0, 0, R.raw.lagoon),
+        Theme("Пальма 4K", R.drawable.bg_palm_poster, 0, 0, R.raw.palm),
         Theme("Мальдивы", R.drawable.bg_maldives, 0, 0),
         Theme("Пляж", R.drawable.bg_beach, 0, 0),
         Theme("Океан", 0, 0xFF03263A.toInt(), 0xFF0A6E86.toInt()),

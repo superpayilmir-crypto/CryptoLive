@@ -33,4 +33,4 @@
 Некоторые биржи недоступны в отдельных странах/у операторов. Просто переключите биржу в приложении (Binance ↔ Bybit ↔ OKX).
 
 
-Фото фонов — [Unsplash](https://unsplash.com) (Unsplash License).
+Фото фонов — [Unsplash](https://unsplash.com) (Unsplash License), видео — [Pexels](https://www.pexels.com) (Pexels License).
