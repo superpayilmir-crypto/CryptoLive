@@ -23,4 +23,4 @@ jobs:
             ffmpeg -v error -y -ss 1 -i media/$2.mp4 -frames:v 1 -vf "crop=600:600:400:1100" media/$2_crop.png
           done
           git config user.name "Claude"; git config user.email "noreply@anthropic.com"
-          git add media; git commit -m "stabilized loops" && git push
+          git add media; git commit -m "1080p loops" && git push
