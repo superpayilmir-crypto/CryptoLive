@@ -10,14 +10,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: |
+          set -x
           sudo apt-get install -y -qq ffmpeg >/dev/null || true
           mkdir -p media
-          for id in 5636114 31387434 29593270 5278926 10452100 30022430 27017491 4627340 35537277 30344687 27696896 12332218 39200736 35102233 3371612 4942034 26651655 35972707 16453402 8187626; do
-            curl -sL -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" "https://www.pexels.com/download/video/$id/" -o /tmp/v.mp4 || continue
-            info=$(ffprobe -v error -select_streams v:0 -show_entries stream=width,height,r_frame_rate:format=duration -of csv=p=0 /tmp/v.mp4 | tr '\n' ' ')
-            echo "$id $(stat -c %s /tmp/v.mp4) $info" >> media/info.txt
-            for t in 1 5; do ffmpeg -v error -ss $t -i /tmp/v.mp4 -frames:v 1 -vf "scale=240:-2" media/${id}_$t.jpg || true; done
-            rm -f /tmp/v.mp4
-          done
+          make_loop () {
+            id=$1; out=$2
+            curl -sL -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" "https://www.pexels.com/download/video/$id/" -o /tmp/$id.mp4
+            D=$(ffprobe -v error -show_entries format=duration -of csv=p=0 /tmp/$id.mp4)
+            L=$(python3 -c "print(round($D-0.15,3))")
+            OFF=$(python3 -c "print(round($D-0.15-1.5-1.5,3))")
+            ffmpeg -v error -y -i /tmp/$id.mp4 -filter_complex "[0:v]trim=0:$L,setpts=PTS-STARTPTS,fps=30,scale=1440:2560:flags=lanczos,format=yuv420p,split[a][b];[a]trim=start=1.5,setpts=PTS-STARTPTS[main];[b]trim=0:1.5,setpts=PTS-STARTPTS[head];[main][head]xfade=transition=fade:duration=1.5:offset=$OFF[out]" -map "[out]" -an -c:v libx264 -profile:v high -level 5.1 -preset slower -tune film -crf 17 -maxrate 30M -bufsize 60M -pix_fmt yuv420p -movflags +faststart media/$out.mp4
+            ffprobe -v error -show_entries stream=width,height,r_frame_rate,bit_rate:format=duration,size -of default=nw=1 media/$out.mp4 > media/$out.txt
+            ffmpeg -v error -y -i media/$out.mp4 -frames:v 1 -q:v 2 media/${out}_poster.jpg
+            for t in 0 2 4; do ffmpeg -v error -y -ss $t -i media/$out.mp4 -frames:v 1 -vf scale=270:-2 media/${out}_f$t.jpg; done
+            ffmpeg -v error -y -sseof -0.08 -i media/$out.mp4 -frames:v 1 -vf scale=270:-2 media/${out}_flast.jpg
+            # кроп 1:1 для проверки резкости
+            ffmpeg -v error -y -ss 1 -i media/$out.mp4 -frames:v 1 -vf "crop=600:600:420:1200" media/${out}_crop.png
+          }
+          make_loop 31387434 lagoon
+          make_loop 30344687 palm
           git config user.name "Claude"; git config user.email "noreply@anthropic.com"
-          git add media; git commit -m "4k candidates" && git push
+          git add media; git commit -m "4k loops" && git push
