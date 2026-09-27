@@ -143,7 +143,7 @@ class MainActivity : Activity(), PriceHub.Listener {
             setPadding(dp(14), dp(4), dp(6), dp(4))
         }
         root.addView(listBox)
-        root.addView(hint("Нажмите ↑ чтобы поднять монету выше, ✕ — удалить. Порядок сохраняется и на обоях."))
+        root.addView(hint("Нажмите на монету — откроется её страница на выбранной бирже. ↑ — поднять выше, ✕ — удалить."))
 
         // Экран блокировки
         root.addView(sectionTitle("Экран блокировки / обои"))
@@ -209,7 +209,7 @@ class MainActivity : Activity(), PriceHub.Listener {
             setOnCheckedChangeListener { _, checked -> onNotifyToggled(checked) }
         }
         root.addView(notifySwitch)
-        root.addView(hint("Работает на всех телефонах, включая Xiaomi/Redmi (HyperOS/MIUI), где сторонние живые обои не ставятся на экран блокировки. Когда экран выключен, соединение ставится на паузу — батарея не тратится."))
+        root.addView(hint("На заблокированном экране нажмите на монету в уведомлении — после разблокировки сразу откроется её страница на выбранной бирже. Работает на всех телефонах, включая Xiaomi/Redmi. Когда экран выключен, соединение на паузе — батарея не тратится."))
 
         setContentView(scroll)
         rebuildList()
@@ -317,6 +317,7 @@ class MainActivity : Activity(), PriceHub.Listener {
             right.addView(changeV)
             row.addView(right)
 
+            row.setOnClickListener { startActivity(OpenExchangeActivity.intentFor(this, p)) }
             row.addView(iconButton("↑") { move(index) })
             row.addView(iconButton("✕") { confirmRemove(p) })
 

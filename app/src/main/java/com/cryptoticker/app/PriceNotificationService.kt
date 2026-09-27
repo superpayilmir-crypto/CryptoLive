@@ -15,12 +15,13 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.SystemClock
+import android.widget.RemoteViews
 
 /** Постоянное уведомление с ценами — видно на экране блокировки на любом телефоне. */
 class PriceNotificationService : Service(), PriceHub.Listener {
 
     companion object {
-        const val CHANNEL = "prices"
+        const val CHANNEL = "prices_lock"
         const val NOTIF_ID = 42
         const val ACTION_STOP = "com.cryptoticker.app.STOP"
 
@@ -55,7 +56,13 @@ class PriceNotificationService : Service(), PriceHub.Listener {
     override fun onCreate() {
         super.onCreate()
         val nm = getSystemService(NotificationManager::class.java)
-        val ch = NotificationChannel(CHANNEL, "Цены в реальном времени", NotificationManager.IMPORTANCE_LOW)
+        // Обычная важность (иначе многие телефоны прячут уведомление на экране блокировки),
+        // но без звука и вибрации
+        try { nm?.deleteNotificationChannel("prices") } catch (_: Exception) {}
+        val ch = NotificationChannel(CHANNEL, "Цены на экране блокировки", NotificationManager.IMPORTANCE_DEFAULT)
+        ch.setSound(null, null)
+        ch.enableVibration(false)
+        ch.enableLights(false)
         ch.lockscreenVisibility = Notification.VISIBILITY_PUBLIC
         ch.setShowBadge(false)
         nm?.createNotificationChannel(ch)
@@ -164,7 +171,6 @@ class PriceNotificationService : Service(), PriceHub.Listener {
             .setSmallIcon(R.drawable.ic_stat)
             .setContentTitle(title)
             .setContentText(text)
-            .setStyle(Notification.BigTextStyle().bigText(big))
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setShowWhen(false)
@@ -176,6 +182,56 @@ class PriceNotificationService : Service(), PriceHub.Listener {
         if (Build.VERSION.SDK_INT >= 31) {
             b.setForegroundServiceBehavior(Notification.FOREGROUND_SERVICE_IMMEDIATE)
         }
+        if (pairs.isEmpty()) {
+            b.setStyle(Notification.BigTextStyle().bigText(big))
+        } else {
+            // Каждая монета — отдельная кнопка: нажали → разблокировка → биржа на этой монете
+            b.setStyle(Notification.DecoratedCustomViewStyle())
+            b.setCustomContentView(collapsedView(pairs))
+            b.setCustomBigContentView(bigView(pairs))
+        }
         return b.build()
+    }
+
+    private fun openPi(p: CoinPair): PendingIntent = PendingIntent.getActivity(
+        this, 1000 + (p.key.hashCode() and 0xFFFF), OpenExchangeActivity.intentFor(this, p),
+        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+    )
+
+    private fun changeColor(t: Ticker?): Int = when {
+        t == null -> 0xFF9E9E9E.toInt()
+        t.changePct >= 0 -> WallRenderer.UP
+        else -> WallRenderer.DOWN
+    }
+
+    private fun collapsedView(pairs: List<CoinPair>): RemoteViews {
+        val root = RemoteViews(packageName, R.layout.notif_collapsed)
+        for (p in pairs.take(3)) {
+            val t = PriceHub.price(p.key)
+            val chip = RemoteViews(packageName, R.layout.notif_chip)
+            chip.setTextViewText(R.id.sym, p.base)
+            chip.setTextViewText(R.id.price, if (t != null) Fmt.price(t.price) else "—")
+            chip.setTextViewText(R.id.change, if (t != null) Fmt.change(t.changePct) else "")
+            chip.setTextColor(R.id.change, changeColor(t))
+            chip.setOnClickPendingIntent(R.id.chip, openPi(p))
+            root.addView(R.id.chips, chip)
+        }
+        return root
+    }
+
+    private fun bigView(pairs: List<CoinPair>): RemoteViews {
+        val root = RemoteViews(packageName, R.layout.notif_big)
+        for (p in pairs.take(6)) {
+            val t = PriceHub.price(p.key)
+            val row = RemoteViews(packageName, R.layout.notif_row)
+            row.setTextViewText(R.id.sym, p.base + "/" + p.quote)
+            row.setTextViewText(R.id.price, if (t != null) Fmt.price(t.price) else "—")
+            row.setTextViewText(R.id.change, if (t != null) Fmt.change(t.changePct) else "")
+            row.setTextColor(R.id.change, changeColor(t))
+            row.setOnClickPendingIntent(R.id.row, openPi(p))
+            root.addView(R.id.rows, row)
+        }
+        root.setTextViewText(R.id.hint, "Нажмите на монету — откроется " + Prefs.exchange(this).title)
+        return root
     }
 }
