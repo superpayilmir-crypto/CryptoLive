@@ -38,6 +38,7 @@ class PriceWallpaperService : WallpaperService() {
         private var gl: VideoGl? = null // только из GL-потока
         private val overlayLock = Any()
         private var overlay: Bitmap? = null
+        private var overlayTop = 0
         private var lastOverlay = 0L
 
         private val frame = object : Runnable {
@@ -169,7 +170,7 @@ class PriceWallpaperService : WallpaperService() {
                     gl = g
                     g.setSize(w, hh)
                     if (shouldPlay) g.play()
-                    synchronized(overlayLock) { overlay?.let { g.uploadOverlay(it) } }
+                    synchronized(overlayLock) { overlay?.let { g.uploadOverlay(it, overlayTop) } }
                     g.render()
                 } else {
                     g.release()
@@ -204,22 +205,29 @@ class PriceWallpaperService : WallpaperService() {
         private fun updateOverlay() {
             if (!videoMode || width <= 0 || height <= 0) return
             lastOverlay = SystemClock.uptimeMillis()
+            // Рисуем только полоску с панелью цен — в разы меньше данных для видеокарты
+            val b = WallRenderer.panelBounds(applicationContext, width, height)
+            val top = (b[0] - 4f).toInt().coerceIn(0, height - 1)
+            val stripH = ((b[1] + 4f).toInt() - top).coerceIn(1, height - top)
             synchronized(overlayLock) {
                 var bmp = overlay
-                if (bmp == null || bmp.width != width || bmp.height != height) {
+                if (bmp == null || bmp.width != width || bmp.height != stripH) {
                     bmp = try {
-                        Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+                        Bitmap.createBitmap(width, stripH, Bitmap.Config.ARGB_8888)
                     } catch (e: OutOfMemoryError) {
                         null
                     }
                     overlay = bmp
                 }
                 if (bmp == null) return
-                WallRenderer.draw(Canvas(bmp), width, height, applicationContext, false, true)
+                overlayTop = top
+                val c = Canvas(bmp)
+                c.translate(0f, -top.toFloat())
+                WallRenderer.draw(c, width, height, applicationContext, false, true)
             }
             glHandler?.post {
                 val g = gl ?: return@post
-                synchronized(overlayLock) { overlay?.let { g.uploadOverlay(it) } }
+                synchronized(overlayLock) { overlay?.let { g.uploadOverlay(it, overlayTop) } }
                 g.render()
             }
         }

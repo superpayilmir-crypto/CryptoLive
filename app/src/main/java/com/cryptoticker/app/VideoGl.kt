@@ -48,6 +48,7 @@ class VideoGl(private val ctx: Context) {
     private var videoH = 0
 
     private val pos: FloatBuffer = floats(-1f, -1f, 1f, -1f, -1f, 1f, 1f, 1f)
+    private var overlayPos: FloatBuffer = floats(-1f, -1f, 1f, -1f, -1f, 1f, 1f, 1f)
     private var videoUv: FloatBuffer = floats(0f, 0f, 1f, 0f, 0f, 1f, 1f, 1f)
     private val overlayUv: FloatBuffer = floats(0f, 1f, 1f, 1f, 0f, 0f, 1f, 0f)
     private val identity = FloatArray(16).also { android.opengl.Matrix.setIdentityM(it, 0) }
@@ -137,9 +138,15 @@ class VideoGl(private val ctx: Context) {
         try { player?.let { if (it.isPlaying) it.pause() } } catch (_: Exception) {}
     }
 
-    /** Загрузить картинку с ценами (вызывать в GL-потоке). */
-    fun uploadOverlay(bmp: Bitmap) {
-        if (!isReady || bmp.isRecycled) return
+    /**
+     * Загрузить полоску с ценами (вызывать в GL-потоке).
+     * @param top где полоска начинается на экране, в пикселях
+     */
+    fun uploadOverlay(bmp: Bitmap, top: Int) {
+        if (!isReady || bmp.isRecycled || height <= 0) return
+        val yTop = 1f - 2f * top / height
+        val yBottom = 1f - 2f * (top + bmp.height) / height
+        overlayPos = floats(-1f, yBottom, 1f, yBottom, -1f, yTop, 1f, yTop)
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, overlayTex)
         if (bmp.width != overlayW || bmp.height != overlayH) {
             GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, bmp, 0)
@@ -169,7 +176,7 @@ class VideoGl(private val ctx: Context) {
         if (overlayValid) {
             GLES20.glEnable(GLES20.GL_BLEND)
             GLES20.glBlendFunc(GLES20.GL_ONE, GLES20.GL_ONE_MINUS_SRC_ALPHA)
-            draw(overlayProgram, GLES20.GL_TEXTURE_2D, overlayTex, overlayUv, identity)
+            draw(overlayProgram, GLES20.GL_TEXTURE_2D, overlayTex, overlayUv, identity, overlayPos)
         }
         EGL14.eglSwapBuffers(display, surface)
     }
@@ -215,7 +222,7 @@ class VideoGl(private val ctx: Context) {
         videoUv = floats(x0, y0, x1, y0, x0, y1, x1, y1)
     }
 
-    private fun draw(prog: Int, target: Int, tex: Int, uv: FloatBuffer, m: FloatArray) {
+    private fun draw(prog: Int, target: Int, tex: Int, uv: FloatBuffer, m: FloatArray, p: FloatBuffer = pos) {
         GLES20.glUseProgram(prog)
         val aPos = GLES20.glGetAttribLocation(prog, "aPos")
         val aTex = GLES20.glGetAttribLocation(prog, "aTex")
@@ -225,10 +232,10 @@ class VideoGl(private val ctx: Context) {
         GLES20.glBindTexture(target, tex)
         GLES20.glUniform1i(uS, 0)
         GLES20.glUniformMatrix4fv(uM, 1, false, m, 0)
-        pos.position(0)
+        p.position(0)
         uv.position(0)
         GLES20.glEnableVertexAttribArray(aPos)
-        GLES20.glVertexAttribPointer(aPos, 2, GLES20.GL_FLOAT, false, 0, pos)
+        GLES20.glVertexAttribPointer(aPos, 2, GLES20.GL_FLOAT, false, 0, p)
         GLES20.glEnableVertexAttribArray(aTex)
         GLES20.glVertexAttribPointer(aTex, 2, GLES20.GL_FLOAT, false, 0, uv)
         GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)

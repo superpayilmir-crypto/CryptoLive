@@ -135,6 +135,26 @@ object WallRenderer {
 
     // ---------- основная отрисовка ----------
 
+    /** Верх и низ панели с ценами в пикселях (та же разметка, что в draw). */
+    fun panelBounds(ctx: Context, w: Int, h: Int): FloatArray {
+        val W = w.toFloat()
+        val H = h.toFloat()
+        val u = W / 400f * Prefs.textScale(ctx)
+        val headerH = 44f * u
+        val rowH = 66f * u
+        val maxRows = max(1, ((H * 0.6f - headerH) / rowH).toInt())
+        val rows = Prefs.pairs(ctx).size.coerceAtMost(maxRows)
+        val blockH = headerH + max(1, rows) * rowH + 8f * u
+        val minTop = H * 0.08f
+        val maxTop = max(minTop, H - blockH - H * 0.05f)
+        val top = when (Prefs.position(ctx)) {
+            0 -> H * 0.24f
+            1 -> (H - blockH) / 2f + H * 0.04f
+            else -> H * 0.80f - blockH
+        }.coerceIn(minTop, maxTop)
+        return floatArrayOf(top, top + blockH)
+    }
+
     /** @param overlayOnly только панель с ценами на прозрачном фоне (для видео-обоев) */
     @Synchronized
     fun draw(c: Canvas, w: Int, h: Int, ctx: Context, animated: Boolean, overlayOnly: Boolean = false) {
