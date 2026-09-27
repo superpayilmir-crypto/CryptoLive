@@ -40,7 +40,7 @@ def expr(base, kv):
         a,b = knots[i], knots[i+1]; va,vb = base+kv[i], base+kv[i+1]
         e = f"if(lt(t\\,{b:.3f})\\,{va:.2f}+({vb-va:.3f})*(t-{a:.3f})/{b-a:.3f}\\,{e})"
     return e
-ow = 1080; oh = 1920
+ow = 1440; oh = 2560
 off = round(L-1.5-1.5, 3)
 fc = (f"[0:v]trim=0:{L},setpts=PTS-STARTPTS,fps=30,crop=w={cw}:h={ch}:x='{expr(X0,kx)}':y='{expr(Y0,ky)}',"
       f"scale={ow}:{oh}:force_original_aspect_ratio=increase:flags=lanczos,crop={ow}:{oh},format=yuv420p,split[a][b];"
@@ -49,8 +49,8 @@ fc = (f"[0:v]trim=0:{L},setpts=PTS-STARTPTS,fps=30,crop=w={cw}:h={ch}:x='{expr(X
 open('fc.txt','w').write(fc)
 print('src', W, H, D, 'drift x', kx.min(), kx.max(), 'y', ky.min(), ky.max(), 'crop', cw, ch, 'out', ow, oh)
 subprocess.check_call(['ffmpeg','-v','error','-y','-i',src,'-filter_complex_script','fc.txt','-map','[out]','-an',
-    '-c:v','libx264','-profile:v','high','-level','4.1','-preset','slower','-tune','film','-crf','20',
-    '-maxrate','9M','-bufsize','18M','-g','60','-pix_fmt','yuv420p','-movflags','+faststart',out])
+    '-c:v','libx264','-profile:v','high','-level','5.1','-preset','slower','-tune','film','-crf','18',
+    '-maxrate','20M','-bufsize','40M','-g','60','-pix_fmt','yuv420p','-movflags','+faststart',out])
 # проверка остаточного дрожания
 shutil.rmtree('fr', ignore_errors=True); os.makedirs('fr')
 subprocess.check_call(['ffmpeg','-v','error','-i',out,'-vf','fps=10,scale=480:854,format=gray','fr/%04d.png'])
