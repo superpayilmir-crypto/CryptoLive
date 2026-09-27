@@ -22,6 +22,14 @@ jobs:
           chmod +x ./gradlew
           ./gradlew assembleRelease --no-daemon --stacktrace
           cp app/build/outputs/apk/release/app-release.apk CryptoLive.apk
+      - name: Verify APK
+        run: |
+          BT=$(ls -d $ANDROID_HOME/build-tools/* | sort -V | tail -1)
+          $BT/zipalign -c -p 4 CryptoLive.apk
+          $BT/apksigner verify --verbose --print-certs CryptoLive.apk | tee verify.txt
+          $BT/aapt2 dump badging CryptoLive.apk | head -3 | tee -a verify.txt
+          echo "SIG=$(grep -m1 'SHA-256' verify.txt | awk '{print $NF}')" >> $GITHUB_ENV
+          echo "VER=$(grep -o "versionCode='[0-9]*'" verify.txt | head -1)" >> $GITHUB_ENV
       - uses: actions/upload-artifact@v4
         with:
           name: CryptoLive-apk
@@ -31,6 +39,6 @@ jobs:
         with:
           tag_name: v1.0.${{ github.run_number }}
           name: Crypto Live ${{ github.run_number }}
-          body: "Скачайте CryptoLive.apk ниже и установите на Android."
+          body: "Скачайте CryptoLive.apk ниже и установите на Android. Проверено: подпись в порядке. ${{ env.VER }} · ключ ${{ env.SIG }}"
           files: CryptoLive.apk
           make_latest: true
