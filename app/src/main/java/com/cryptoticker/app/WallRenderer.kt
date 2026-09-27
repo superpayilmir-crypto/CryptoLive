@@ -24,10 +24,14 @@ import kotlin.math.sin
 /** Рисует обои с ценами. Все размеры считаются от ширины, поэтому годится и для предпросмотра. */
 object WallRenderer {
 
-    /** photo != 0 — фон из фотографии, иначе вертикальный градиент top→bottom. */
-    class Theme(val name: String, val photo: Int, val top: Int, val bottom: Int)
+    /**
+     * video != 0 — живое видео (photo — его первый кадр для предпросмотра),
+     * photo != 0 — фон из фотографии, иначе вертикальный градиент top→bottom.
+     */
+    class Theme(val name: String, val photo: Int, val top: Int, val bottom: Int, val video: Int = 0)
 
     val themes = listOf(
+        Theme("Живое видео", R.drawable.bg_video_poster, 0, 0, R.raw.ocean),
         Theme("Мальдивы", R.drawable.bg_maldives, 0, 0),
         Theme("Пляж", R.drawable.bg_beach, 0, 0),
         Theme("Океан", 0, 0xFF03263A.toInt(), 0xFF0A6E86.toInt()),
@@ -35,9 +39,12 @@ object WallRenderer {
         Theme("AMOLED", 0, 0xFF000000.toInt(), 0xFF000000.toInt())
     )
 
+    fun current(ctx: Context): Theme = themes[Prefs.theme(ctx).coerceIn(0, themes.size - 1)]
+
+    /** Анимация фото на Canvas (для видео-темы анимацию делает VideoGl). */
     fun isAnimated(ctx: Context): Boolean {
-        val th = themes[Prefs.theme(ctx).coerceIn(0, themes.size - 1)]
-        return th.photo != 0 && Prefs.animate(ctx)
+        val th = current(ctx)
+        return th.photo != 0 && th.video == 0 && Prefs.animate(ctx)
     }
 
     val UP = 0xFF16C784.toInt()
@@ -127,15 +134,21 @@ object WallRenderer {
 
     // ---------- основная отрисовка ----------
 
-    fun draw(c: Canvas, w: Int, h: Int, ctx: Context, animated: Boolean) {
+    /** @param overlayOnly только панель с ценами на прозрачном фоне (для видео-обоев) */
+    @Synchronized
+    fun draw(c: Canvas, w: Int, h: Int, ctx: Context, animated: Boolean, overlayOnly: Boolean = false) {
         if (w <= 0 || h <= 0) return
-        val th = themes[Prefs.theme(ctx).coerceIn(0, themes.size - 1)]
+        val th = current(ctx)
         val W = w.toFloat()
         val H = h.toFloat()
 
-        // Полностью непрозрачный фон на каждом кадре — никаких «следов»
-        c.drawColor(0xFF000000.toInt())
-        drawBackground(c, ctx, th, W, H, animated)
+        if (overlayOnly) {
+            c.drawColor(0, android.graphics.PorterDuff.Mode.CLEAR)
+        } else {
+            // Полностью непрозрачный фон на каждом кадре — никаких «следов»
+            c.drawColor(0xFF000000.toInt())
+            drawBackground(c, ctx, th, W, H, animated && th.video == 0)
+        }
 
         val u = W / 400f * Prefs.textScale(ctx)
         val pairs = Prefs.pairs(ctx)

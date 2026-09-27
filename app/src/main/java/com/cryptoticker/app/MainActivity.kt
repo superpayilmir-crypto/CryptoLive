@@ -172,7 +172,7 @@ class MainActivity : Activity(), PriceHub.Listener {
         root.addView(segment(listOf("Под часами", "По центру", "Ниже"), Prefs.position(this)) { i ->
             Prefs.setPosition(this, i); PriceHub.notifyListeners()
         })
-        root.addView(toggle("Плавная анимация фото", Prefs.animate(this)) { v ->
+        root.addView(toggle("Анимация фона (видео и фото)", Prefs.animate(this)) { v ->
             Prefs.setAnimate(this, v); PriceHub.notifyListeners()
         })
         root.addView(toggle("График за 24 часа", Prefs.showChart(this)) { v ->
