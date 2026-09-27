@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Crypto Live</string>
+    <string name="wallpaper_name">Crypto Live — цены</string>
+    <string name="wallpaper_desc">Живые цены криптовалют в реальном времени на рабочем столе и экране блокировки</string>
+</resources>
