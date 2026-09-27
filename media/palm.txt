@@ -1,0 +1,6 @@
+width=1440
+height=2560
+r_frame_rate=30/1
+bit_rate=32018145
+duration=10.266667
+size=41094973
