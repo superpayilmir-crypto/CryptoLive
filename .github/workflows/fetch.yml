@@ -1,4 +1,4 @@
-name: Fetch photos
+name: Fetch media
 on:
   push:
     branches: [fetch-photos]
@@ -10,10 +10,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: |
-          mkdir -p photos
-          for id in 1751237422072-a6564c97a90a 1499202189329-5d76e29aa2b6 1753029995957-f973b37fd0e3 1753679704846-7ba944fcb1dd; do
-            curl -sL "https://images.unsplash.com/photo-$id?fm=jpg&q=90&w=2400" -o photos/$id.jpg || true
-            file photos/$id.jpg
+          sudo apt-get install -y -qq ffmpeg >/dev/null || true
+          mkdir -p media
+          for id in 32002998 27212833 35215090 35383429 31949353 28197980 34103646; do
+            curl -sL -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" "https://www.pexels.com/download/video/$id/" -o /tmp/$id.mp4 || true
+            echo "== $id" >> media/info.txt
+            file /tmp/$id.mp4 >> media/info.txt
+            ls -la /tmp/$id.mp4 >> media/info.txt
+            ffprobe -v error -select_streams v:0 -show_entries stream=width,height,r_frame_rate:format=duration -of csv=p=0 /tmp/$id.mp4 >> media/info.txt 2>&1 || true
+            for t in 1 4; do ffmpeg -v error -ss $t -i /tmp/$id.mp4 -frames:v 1 -vf scale=360:-2 media/${id}_$t.jpg || true; done
           done
           git config user.name "Claude"; git config user.email "noreply@anthropic.com"
-          git add photos; git commit -m "photos" && git push
+          git add media; git commit -m "media previews" && git push
