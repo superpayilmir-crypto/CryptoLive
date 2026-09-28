@@ -1,5 +1,7 @@
 # Crypto Live — цены криптовалют в реальном времени (Android)
 
+**Скачать:** https://superpayilmir-crypto.github.io/CryptoLive/
+
 Живые цены с бирж **Binance / Bybit / OKX** через WebSocket (обновление каждую секунду и чаще).
 
 * Любые монеты: вводите тикер (`SOL`, `PEPE`, `ETH/BTC`, `TONUSDC`) — приложение проверит, что пара торгуется на выбранной бирже.

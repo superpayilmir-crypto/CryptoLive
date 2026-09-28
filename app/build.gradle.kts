@@ -17,22 +17,28 @@ android {
         versionName = "1.0.$run"
     }
 
+    // Ключ подписи НЕ хранится в коде: на GitHub он расшифровывается из
+    // app/release.keystore.enc паролем из секрета SIGNING_PASSWORD.
+    // Локально без пароля сборка подписывается отладочным ключом.
+    val ksPath = System.getenv("SIGNING_KEYSTORE")
+    val ksPass = System.getenv("SIGNING_PASSWORD")
+    val hasKey = !ksPath.isNullOrBlank() && !ksPass.isNullOrBlank() && file(ksPath).exists()
+
     signingConfigs {
-        create("app") {
-            storeFile = file("cryptolive.keystore")
-            storePassword = "cryptolive"
-            keyAlias = "cryptolive"
-            keyPassword = "cryptolive"
+        if (hasKey) {
+            create("app") {
+                storeFile = file(ksPath!!)
+                storePassword = ksPass
+                keyAlias = "cryptolive"
+                keyPassword = ksPass
+            }
         }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
-            signingConfig = signingConfigs.getByName("app")
-        }
-        debug {
-            signingConfig = signingConfigs.getByName("app")
+            signingConfig = if (hasKey) signingConfigs.getByName("app") else signingConfigs.getByName("debug")
         }
     }
 

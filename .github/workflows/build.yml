@@ -3,6 +3,7 @@ name: Build APK
 on:
   push:
     branches: [main]
+    paths-ignore: ["site/**", ".github/workflows/pages.yml", "README.md"]
   workflow_dispatch:
 
 permissions:
@@ -17,7 +18,20 @@ jobs:
         with:
           distribution: temurin
           java-version: 17
+      - name: Decrypt signing key
+        env:
+          SIGNING_PASSWORD: ${{ secrets.SIGNING_PASSWORD }}
+        run: |
+          if [ -z "$SIGNING_PASSWORD" ]; then
+            echo "::error::Добавьте секрет SIGNING_PASSWORD: Settings → Secrets and variables → Actions"
+            exit 1
+          fi
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -in app/release.keystore.enc \
+            -out "$RUNNER_TEMP/release.keystore" -pass env:SIGNING_PASSWORD
+          echo "SIGNING_KEYSTORE=$RUNNER_TEMP/release.keystore" >> $GITHUB_ENV
       - name: Build
+        env:
+          SIGNING_PASSWORD: ${{ secrets.SIGNING_PASSWORD }}
         run: |
           chmod +x ./gradlew
           ./gradlew assembleRelease --no-daemon --stacktrace
