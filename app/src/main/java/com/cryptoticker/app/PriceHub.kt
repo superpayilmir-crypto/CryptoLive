@@ -277,13 +277,18 @@ object PriceHub {
         flushScheduled.set(false)
         if (pending.isEmpty()) return@Runnable
         val now = System.currentTimeMillis()
+        val updated = HashMap<String, Double>()
         for (key in pending.keys.toList()) {
             val t = pending.remove(key) ?: continue
             val old = prices[key]
             if (old != null && t.time < old.time) continue
             val fixed = if (t.changePct.isNaN()) t.copy(changePct = old?.changePct ?: 0.0) else t
             prices[key] = fixed
+            updated[key] = fixed.price
             if (t.time > 1L) lastUpdate = now
+        }
+        appContext?.let { ctx ->
+            try { Alerts.onPrices(ctx, updated) } catch (_: Exception) {}
         }
         notifyListeners()
     }

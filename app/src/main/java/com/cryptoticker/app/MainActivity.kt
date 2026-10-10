@@ -42,6 +42,7 @@ class MainActivity : Activity(), PriceHub.Listener {
     private lateinit var addBtn: Button
     private lateinit var notifySwitch: Switch
     private val rowViews = HashMap<String, Array<TextView>>()
+    private lateinit var alertsBox: LinearLayout
 
     private val cText = 0xFFFFFFFF.toInt()
     private val cMuted = 0xFF8A93A6.toInt()
@@ -145,6 +146,27 @@ class MainActivity : Activity(), PriceHub.Listener {
         root.addView(listBox)
         root.addView(hint("Нажмите на монету — откроется её страница на выбранной бирже. ↑ — поднять выше, ✕ — удалить."))
 
+        // Ценовые уведомления
+        root.addView(sectionTitle("Ценовые уведомления"))
+        root.addView(hint("Нажмите 🔔 у монеты и задайте цену — когда монета до неё дойдёт, придёт уведомление со звуком. Работает и при выключенном экране."))
+        alertsBox = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = rounded(cCard, dp(16))
+            setPadding(dp(14), dp(4), dp(6), dp(4))
+        }
+        root.addView(alertsBox, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+        ).apply { topMargin = dp(10) })
+        root.addView(Button(this).apply {
+            text = "Разрешить работу в фоне (без ограничений батареи)"
+            isAllCaps = false
+            textSize = 13f
+            setTextColor(cText)
+            background = rounded(cChip, dp(12))
+            setOnClickListener { askIgnoreBattery() }
+        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(46)).apply { topMargin = dp(10) })
+        root.addView(hint("Чтобы уведомления приходили надёжно, разрешите приложению работать без ограничений. На Xiaomi также включите «Автозапуск»."))
+
         // Экран блокировки
         root.addView(sectionTitle("Экран блокировки / обои"))
         root.addView(WallpaperPreview(this), LinearLayout.LayoutParams(
@@ -214,9 +236,10 @@ class MainActivity : Activity(), PriceHub.Listener {
         setContentView(scroll)
         rebuildList()
 
-        if (Prefs.notifyEnabled(this)) {
+        if (Prefs.notifyEnabled(this) || Alerts.hasActive(this)) {
             try { PriceNotificationService.start(this) } catch (_: Exception) {}
         }
+        rebuildAlerts()
     }
 
     override fun onStart() {
@@ -241,7 +264,16 @@ class MainActivity : Activity(), PriceHub.Listener {
 
     // ---------- цены ----------
 
+    private var lastAlertsSig = ""
+
     override fun onPricesUpdated() {
+        val sig = Alerts.all(this).joinToString { "${it.id}:${it.active}" }
+        if (sig != lastAlertsSig && ::alertsBox.isInitialized) {
+            lastAlertsSig = sig
+            rebuildAlerts()
+            rebuildList()
+            return
+        }
         val ex = Prefs.exchange(this).title
         statusView.text = when (PriceHub.state) {
             PriceHub.State.ONLINE -> if (PriceHub.lastUpdate > 0)
@@ -318,6 +350,10 @@ class MainActivity : Activity(), PriceHub.Listener {
             row.addView(right)
 
             row.setOnClickListener { startActivity(OpenExchangeActivity.intentFor(this, p)) }
+            val nAl = Alerts.forPair(this, p.key).count { it.active }
+            row.addView(iconButton(if (nAl > 0) "🔔$nAl" else "🔔") { showAlertDialog(p) }.apply {
+                if (nAl > 0) setTextColor(cAccent)
+            })
             row.addView(iconButton("↑") { move(index) })
             row.addView(iconButton("✕") { confirmRemove(p) })
 
@@ -382,7 +418,9 @@ class MainActivity : Activity(), PriceHub.Listener {
             .setMessage("Удалить ${p.key}?")
             .setPositiveButton("Удалить") { _, _ ->
                 Prefs.setPairs(this, Prefs.pairs(this).filter { it.key != p.key })
+                Alerts.removeForPair(this, p.key)
                 rebuildList()
+                rebuildAlerts()
                 PriceHub.reload(this)
             }
             .setNegativeButton("Отмена", null)
@@ -423,7 +461,11 @@ class MainActivity : Activity(), PriceHub.Listener {
             }
         } else {
             Prefs.setNotifyEnabled(this, false)
-            PriceNotificationService.stop(this)
+            if (Alerts.hasActive(this)) {
+                try { PriceNotificationService.start(this) } catch (_: Exception) {}
+            } else {
+                PriceNotificationService.stop(this)
+            }
         }
     }
 
@@ -436,6 +478,158 @@ class MainActivity : Activity(), PriceHub.Listener {
         } else {
             notifySwitch.isChecked = false
             toast("Без разрешения на уведомления цены в шторке не показать")
+        }
+    }
+
+    // ---------- ценовые уведомления ----------
+
+    private fun parsePrice(s: String): Double? =
+        s.trim().replace(" ", "").replace("\u00A0", "").replace(",", ".").toDoubleOrNull()?.takeIf { it > 0 }
+
+    private fun showAlertDialog(p: CoinPair) {
+        val current = PriceHub.price(p.key)?.price
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(8), dp(20), 0)
+        }
+        box.addView(TextView(this).apply {
+            text = if (current != null) "Сейчас: ${Fmt.price(current)} ${p.quote}" else "Цена загружается…"
+            textSize = 15f
+        })
+        val input = EditText(this).apply {
+            hint = "Цена, например " + (current?.let { Fmt.price(it * 1.05) } ?: "100")
+            inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
+            textSize = 18f
+            isSingleLine = true
+        }
+        box.addView(input)
+        val dirView = TextView(this).apply { textSize = 13f; setPadding(0, dp(2), 0, dp(8)) }
+        box.addView(dirView)
+        fun updateDir() {
+            val v = parsePrice(input.text.toString())
+            dirView.text = when {
+                v == null -> "Введите цену — направление определится само"
+                current == null || v >= current -> "▲ Уведомлю, когда цена поднимется до ${Fmt.price(v)}"
+                else -> "▼ Уведомлю, когда цена опустится до ${Fmt.price(v)}"
+            }
+        }
+        input.addTextChangedListener(object : android.text.TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+            override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+            override fun afterTextChanged(s: android.text.Editable?) { updateDir() }
+        })
+        updateDir()
+        if (current != null) {
+            val quick = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            for (pct in listOf(-10, -5, 5, 10)) {
+                quick.addView(Button(this).apply {
+                    text = (if (pct > 0) "+" else "") + pct + "%"
+                    isAllCaps = false
+                    textSize = 13f
+                    setOnClickListener {
+                        val v = current * (1 + pct / 100.0)
+                        input.setText(Fmt.price(v).replace(" ", ""))
+                        input.setSelection(input.text.length)
+                    }
+                }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            }
+            box.addView(quick)
+        }
+        val existing = Alerts.forPair(this, p.key).filter { it.active }
+        if (existing.isNotEmpty()) {
+            box.addView(TextView(this).apply {
+                text = "Уже заданы:"
+                textSize = 13f
+                setPadding(0, dp(10), 0, dp(2))
+            })
+            for (a in existing) box.addView(TextView(this).apply { text = "• " + a.describe(); textSize = 14f })
+        }
+        AlertDialog.Builder(this)
+            .setTitle("🔔 Уведомление для ${p.key}")
+            .setView(box)
+            .setPositiveButton("Добавить") { _, _ ->
+                val v = parsePrice(input.text.toString())
+                if (v == null) {
+                    toast("Введите цену числом")
+                } else {
+                    val a = Alerts.add(this, p.key, v, PriceHub.price(p.key)?.price)
+                    ensureNotifyPermission()
+                    try { PriceNotificationService.start(this) } catch (_: Exception) {}
+                    rebuildAlerts()
+                    rebuildList()
+                    toast("Готово: ${p.base} " + a.describe())
+                }
+            }
+            .setNegativeButton("Отмена", null)
+            .show()
+    }
+
+    private fun rebuildAlerts() {
+        if (!::alertsBox.isInitialized) return
+        alertsBox.removeAllViews()
+        val all = Alerts.all(this).sortedWith(compareBy({ !it.active }, { -it.id }))
+        if (all.isEmpty()) {
+            alertsBox.addView(TextView(this).apply {
+                text = "Пока нет — нажмите 🔔 у монеты в списке выше"
+                setTextColor(cMuted)
+                setPadding(0, dp(14), 0, dp(14))
+            })
+            return
+        }
+        for ((i, a) in all.withIndex()) {
+            if (i > 0) alertsBox.addView(View(this).apply { setBackgroundColor(0x14FFFFFF) },
+                LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 1))
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(0, dp(10), 0, dp(10))
+            }
+            val p = a.pair
+            row.addView(TextView(this).apply {
+                text = (p?.base ?: a.key) + "  " + a.describe()
+                textSize = 15f
+                setTextColor(if (a.active) cText else cMuted)
+            }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            if (!a.active) {
+                row.addView(TextView(this).apply {
+                    text = "✓ сработало"
+                    textSize = 12f
+                    setTextColor(cAccent)
+                })
+            }
+            row.addView(iconButton("✕") {
+                Alerts.remove(this, a.id)
+                rebuildAlerts()
+                rebuildList()
+            })
+            alertsBox.addView(row)
+        }
+        lastAlertsSig = Alerts.all(this).joinToString { "${it.id}:${it.active}" }
+    }
+
+    private fun ensureNotifyPermission() {
+        if (Build.VERSION.SDK_INT >= 33 &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 8)
+        }
+    }
+
+    private fun askIgnoreBattery() {
+        try {
+            val pm = getSystemService(android.os.PowerManager::class.java)
+            if (pm != null && pm.isIgnoringBatteryOptimizations(packageName)) {
+                toast("Уже разрешено — приложение работает без ограничений")
+                return
+            }
+            startActivity(Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
+                .setData(android.net.Uri.parse("package:$packageName")))
+        } catch (e: Exception) {
+            try {
+                startActivity(Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+            } catch (_: Exception) {
+                toast("Откройте настройки батареи телефона вручную")
+            }
         }
     }
 

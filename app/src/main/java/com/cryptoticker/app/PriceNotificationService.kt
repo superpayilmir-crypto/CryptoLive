@@ -45,7 +45,8 @@ class PriceNotificationService : Service(), PriceHub.Listener {
     private val screenReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             when (intent.action) {
-                Intent.ACTION_SCREEN_OFF -> setSubscribed(false)
+                // Экран выключен: следим за ценой дальше, только если есть ценовые уведомления
+                Intent.ACTION_SCREEN_OFF -> setSubscribed(Alerts.hasActive(this@PriceNotificationService))
                 Intent.ACTION_SCREEN_ON, Intent.ACTION_USER_PRESENT -> setSubscribed(true)
             }
         }
@@ -91,6 +92,11 @@ class PriceNotificationService : Service(), PriceHub.Listener {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {
             Prefs.setNotifyEnabled(this, false)
+            if (Alerts.hasActive(this)) {
+                // цены в шторке выключили, но ценовые уведомления продолжают работать
+                postNow()
+                return START_STICKY
+            }
             stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf()
             return START_NOT_STICKY
@@ -118,6 +124,12 @@ class PriceNotificationService : Service(), PriceHub.Listener {
     }
 
     override fun onPricesUpdated() {
+        // Нечего показывать и не за чем следить — служба больше не нужна
+        if (!Prefs.notifyEnabled(this) && !Alerts.hasActive(this)) {
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            stopSelf()
+            return
+        }
         // Не чаще раза в 1.5 секунды, чтобы система не глушила обновления
         val since = SystemClock.elapsedRealtime() - lastPost
         handler.removeCallbacks(postRunnable)
@@ -137,7 +149,33 @@ class PriceNotificationService : Service(), PriceHub.Listener {
         return "${p.base}  ${Fmt.price(t.price)}  ${Fmt.change(t.changePct)}"
     }
 
+    /** Скромное уведомление, когда цены в шторке выключены, но есть ценовые цели. */
+    private fun buildWatching(): Notification {
+        val alerts = Alerts.active(this)
+        val lines = alerts.joinToString("\n") { a ->
+            val p = a.pair
+            (p?.base ?: a.key) + "  " + a.describe()
+        }
+        val open = PendingIntent.getActivity(
+            this, 0, Intent(this, MainActivity::class.java),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+        return Notification.Builder(this, CHANNEL)
+            .setSmallIcon(R.drawable.ic_stat)
+            .setContentTitle("🔔 Слежу за ценой: ${alerts.size}")
+            .setContentText(lines.substringBefore("\n"))
+            .setStyle(Notification.BigTextStyle().bigText(lines))
+            .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .setShowWhen(false)
+            .setVisibility(Notification.VISIBILITY_PUBLIC)
+            .setCategory(Notification.CATEGORY_STATUS)
+            .setContentIntent(open)
+            .build()
+    }
+
     private fun build(): Notification {
+        if (!Prefs.notifyEnabled(this) && Alerts.hasActive(this)) return buildWatching()
         val pairs = Prefs.pairs(this)
         val title: String
         val text: String
@@ -147,7 +185,8 @@ class PriceNotificationService : Service(), PriceHub.Listener {
             text = "Добавьте монеты в приложении"
             big = text
         } else {
-            title = line(pairs[0])
+            val nAlerts = Alerts.active(this).size
+            title = (if (nAlerts > 0) "🔔$nAlerts  " else "") + line(pairs[0])
             val rest = pairs.drop(1)
             text = rest.take(3).joinToString(" · ") { p ->
                 val t = PriceHub.price(p.key)
