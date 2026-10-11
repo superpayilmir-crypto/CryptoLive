@@ -43,6 +43,9 @@ class MainActivity : Activity(), PriceHub.Listener {
     private lateinit var notifySwitch: Switch
     private val rowViews = HashMap<String, Array<TextView>>()
     private lateinit var alertsBox: LinearLayout
+    private lateinit var soundUpView: TextView
+    private lateinit var soundDownView: TextView
+    private var previewPlayer: android.media.MediaPlayer? = null
 
     private val cText = 0xFFFFFFFF.toInt()
     private val cMuted = 0xFF8A93A6.toInt()
@@ -157,6 +160,22 @@ class MainActivity : Activity(), PriceHub.Listener {
         root.addView(alertsBox, LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
         ).apply { topMargin = dp(10) })
+        soundUpView = settingRow("Звук при росте", Alerts.soundUp(this).title) { pickSound(true) }
+        root.addView(soundUpView.parent as View)
+        soundDownView = settingRow("Звук при падении", Alerts.soundDown(this).title) { pickSound(false) }
+        root.addView(soundDownView.parent as View)
+        root.addView(Button(this).apply {
+            text = "🔊 Проверить уведомление"
+            isAllCaps = false
+            textSize = 13f
+            setTextColor(cText)
+            background = rounded(cChip, dp(12))
+            setOnClickListener {
+                ensureNotifyPermission()
+                Alerts.test(this@MainActivity, true)
+                toast("Пробное уведомление отправлено")
+            }
+        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(46)).apply { topMargin = dp(10) })
         root.addView(Button(this).apply {
             text = "Разрешить работу в фоне (без ограничений батареи)"
             isAllCaps = false
@@ -605,6 +624,77 @@ class MainActivity : Activity(), PriceHub.Listener {
             alertsBox.addView(row)
         }
         lastAlertsSig = Alerts.all(this).joinToString { "${it.id}:${it.active}" }
+    }
+
+    /** Строка настройки «Название — значение ▸»; возвращает TextView значения. */
+    private fun settingRow(title: String, value: String, onClick: () -> Unit): TextView {
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            background = rounded(cCard, dp(12))
+            setPadding(dp(14), dp(12), dp(14), dp(12))
+            setOnClickListener { onClick() }
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = dp(10) }
+        }
+        row.addView(TextView(this).apply {
+            text = title
+            textSize = 15f
+            setTextColor(cText)
+        }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        val v = TextView(this).apply {
+            text = "$value  ▸"
+            textSize = 14f
+            setTextColor(cAccent)
+        }
+        row.addView(v)
+        return v
+    }
+
+    private fun playPreview(snd: AlertSound) {
+        try {
+            previewPlayer?.release()
+            previewPlayer = null
+            when {
+                snd.res > 0 -> {
+                    previewPlayer = android.media.MediaPlayer.create(this, snd.res)?.apply {
+                        setOnCompletionListener { it.release(); if (previewPlayer === it) previewPlayer = null }
+                        start()
+                    }
+                }
+                snd.res == 0 -> android.media.RingtoneManager.getRingtone(
+                    this, android.media.RingtoneManager.getDefaultUri(android.media.RingtoneManager.TYPE_NOTIFICATION)
+                )?.play()
+                else -> {
+                    val vib = getSystemService(android.os.Vibrator::class.java)
+                    vib?.vibrate(android.os.VibrationEffect.createWaveform(longArrayOf(0, 250, 150, 250, 150, 400), -1))
+                }
+            }
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun pickSound(up: Boolean) {
+        val current = if (up) Alerts.soundUp(this) else Alerts.soundDown(this)
+        var chosen = Alerts.sounds.indexOfFirst { it.id == current.id }.coerceAtLeast(0)
+        AlertDialog.Builder(this)
+            .setTitle(if (up) "Звук при росте цены" else "Звук при падении цены")
+            .setSingleChoiceItems(Alerts.sounds.map { it.title }.toTypedArray(), chosen) { _, which ->
+                chosen = which
+                playPreview(Alerts.sounds[which])
+            }
+            .setPositiveButton("Выбрать") { _, _ ->
+                val snd = Alerts.sounds[chosen]
+                if (up) {
+                    Alerts.setSoundUp(this, snd.id); soundUpView.text = "${snd.title}  ▸"
+                } else {
+                    Alerts.setSoundDown(this, snd.id); soundDownView.text = "${snd.title}  ▸"
+                }
+                previewPlayer?.release(); previewPlayer = null
+            }
+            .setNegativeButton("Отмена") { _, _ -> previewPlayer?.release(); previewPlayer = null }
+            .show()
     }
 
     private fun ensureNotifyPermission() {

@@ -27,9 +27,36 @@ data class PriceAlert(
     fun describe(): String = (if (above) "▲ поднимется до " else "▼ опустится до ") + Fmt.price(target)
 }
 
+/** Звук ценового уведомления. res > 0 — свой звук, 0 — системный, -1 — только вибрация. */
+class AlertSound(val id: String, val title: String, val res: Int)
+
 object Alerts {
     private const val PREF = "alerts"
-    const val CHANNEL = "price_alerts"
+
+    val sounds = listOf(
+        AlertSound("rise", "Мелодия вверх", R.raw.snd_rise),
+        AlertSound("fall", "Мелодия вниз", R.raw.snd_fall),
+        AlertSound("bell", "Колокольчик", R.raw.snd_bell),
+        AlertSound("coins", "Монетки", R.raw.snd_coins),
+        AlertSound("beeps", "Тройной сигнал", R.raw.snd_beeps),
+        AlertSound("alarm", "Тревога", R.raw.snd_alarm),
+        AlertSound("drop", "Капля", R.raw.snd_drop),
+        AlertSound("system", "Системный звук", 0),
+        AlertSound("silent", "Только вибрация", -1)
+    )
+
+    fun sound(id: String?): AlertSound = sounds.firstOrNull { it.id == id } ?: sounds[0]
+
+    fun soundUp(c: Context): AlertSound = sound(sp(c).getString("snd_up", "rise"))
+    fun soundDown(c: Context): AlertSound = sound(sp(c).getString("snd_down", "fall"))
+    fun setSoundUp(c: Context, id: String) { sp(c).edit().putString("snd_up", id).apply() }
+    fun setSoundDown(c: Context, id: String) { sp(c).edit().putString("snd_down", id).apply() }
+
+    fun soundUri(c: Context, snd: AlertSound): android.net.Uri? = when {
+        snd.res > 0 -> android.net.Uri.parse("android.resource://" + c.packageName + "/" + snd.res)
+        snd.res == 0 -> RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+        else -> null
+    }
 
     @Volatile
     private var cache: List<PriceAlert>? = null
@@ -110,37 +137,48 @@ object Alerts {
         if (changed) save(c, out)
     }
 
-    fun ensureChannel(c: Context) {
-        val nm = c.getSystemService(NotificationManager::class.java) ?: return
-        if (nm.getNotificationChannel(CHANNEL) != null) return
-        val ch = NotificationChannel(CHANNEL, "Цена достигла цели", NotificationManager.IMPORTANCE_HIGH)
+    /** В Android звук задаётся каналом, поэтому у каждого звука свой канал. */
+    fun ensureChannel(c: Context, snd: AlertSound): String {
+        val id = "alert_" + snd.id
+        val nm = c.getSystemService(NotificationManager::class.java) ?: return id
+        try { nm.deleteNotificationChannel("price_alerts") } catch (_: Exception) {}
+        if (nm.getNotificationChannel(id) != null) return id
+        val ch = NotificationChannel(id, "Цена достигла цели — " + snd.title, NotificationManager.IMPORTANCE_HIGH)
         ch.description = "Уведомления, когда монета достигает заданной цены"
         ch.enableVibration(true)
         ch.vibrationPattern = longArrayOf(0, 250, 150, 250, 150, 400)
         ch.lockscreenVisibility = Notification.VISIBILITY_PUBLIC
         ch.setSound(
-            RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION),
+            soundUri(c, snd),
             AudioAttributes.Builder()
                 .setUsage(AudioAttributes.USAGE_NOTIFICATION_EVENT)
                 .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
                 .build()
         )
         nm.createNotificationChannel(ch)
+        return id
     }
 
-    private fun notifyFired(c: Context, a: PriceAlert) {
+    /** Пробное уведомление — проверить звук и вид. */
+    fun test(c: Context, above: Boolean) {
+        val p = Prefs.pairs(c).firstOrNull() ?: CoinPair("BTC", "USDT")
+        val price = PriceHub.price(p.key)?.price ?: 100000.0
+        notifyFired(c, PriceAlert(System.currentTimeMillis(), p.key, price, above, false, System.currentTimeMillis(), price), true)
+    }
+
+    private fun notifyFired(c: Context, a: PriceAlert, isTest: Boolean = false) {
         val p = a.pair ?: return
         try {
-            ensureChannel(c)
+            val channel = ensureChannel(c, if (a.above) soundUp(c) else soundDown(c))
             val nm = c.getSystemService(NotificationManager::class.java) ?: return
             val open = PendingIntent.getActivity(
                 c, (a.id and 0x7FFFFFFF).toInt(), OpenExchangeActivity.intentFor(c, p),
                 PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
             )
             val arrow = if (a.above) "▲" else "▼"
-            val title = "$arrow ${p.base} достиг ${Fmt.price(a.target)}"
+            val title = (if (isTest) "Проверка: " else "") + "$arrow ${p.base} достиг ${Fmt.price(a.target)}"
             val text = "Цена сейчас ${Fmt.price(a.firedPrice)} ${p.quote}. Нажмите — откроется ${Prefs.exchange(c).title}"
-            val n = Notification.Builder(c, CHANNEL)
+            val n = Notification.Builder(c, channel)
                 .setSmallIcon(R.drawable.ic_stat)
                 .setContentTitle(title)
                 .setContentText(text)
