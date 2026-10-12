@@ -4,6 +4,10 @@ on:
   push:
     branches: [main]
     paths: ["site/**", ".github/workflows/pages.yml"]
+  # после каждой новой сборки приложения — обновить копию APK на сайте
+  workflow_run:
+    workflows: ["Build APK"]
+    types: [completed]
   workflow_dispatch:
 
 permissions:
@@ -17,12 +21,18 @@ concurrency:
 
 jobs:
   deploy:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     environment:
       name: github-pages
       url: ${{ steps.deploy.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
+      - name: Копия свежего APK на сайте
+        run: |
+          curl -fL --retry 3 -o site/CryptoLive.apk \
+            https://github.com/superpayilmir-crypto/CryptoLive/releases/latest/download/CryptoLive.apk
+          ls -la site/CryptoLive.apk
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
